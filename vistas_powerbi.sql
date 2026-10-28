@@ -86,3 +86,41 @@ SELECT ShipperID AS id_transportista,
 FROM Shippers
 
 GO
+
+
+-- Vista de la dimensión calendario: una fila por día, años completos
+CREATE OR ALTER VIEW rpt.v_calendario
+AS
+WITH periodo AS (
+    -- 1) Límites: 1 de enero del primer año y 31 de diciembre del último
+    SELECT DATEFROMPARTS(MIN(YEAR(OrderDate)), 1, 1)  AS inicio,
+           DATEFROMPARTS(MAX(YEAR(OrderDate)), 12, 31) AS fin
+    FROM dbo.Orders
+),
+fechas AS (
+    -- 2) Una fila por día entre inicio y fin
+    SELECT DATEADD(DAY, s.value, p.inicio) AS fecha
+    FROM periodo AS p
+    CROSS APPLY GENERATE_SERIES(0, DATEDIFF(DAY, p.inicio, p.fin)) AS s
+)
+-- 3) Las columnas de la dimensión
+SELECT
+    fecha,
+    YEAR(fecha)                          AS anio,
+    DATEPART(QUARTER, fecha)             AS trimestre,
+    MONTH(fecha)                         AS mes,
+    CHOOSE(MONTH(fecha),
+           N'Enero', N'Febrero', N'Marzo', N'Abril', N'Mayo', N'Junio',
+           N'Julio', N'Agosto', N'Septiembre', N'Octubre', N'Noviembre', N'Diciembre')
+                                         AS nombre_mes,
+    YEAR(fecha) * 100 + MONTH(fecha)     AS anio_mes,
+    DAY(fecha)                           AS dia,
+    DATEDIFF(DAY, '19000101', fecha) % 7 + 1
+                                         AS dia_semana,
+    CHOOSE(DATEDIFF(DAY, '19000101', fecha) % 7 + 1,
+           N'Lunes', N'Martes', N'Miércoles', N'Jueves', N'Viernes', N'Sábado', N'Domingo')
+                                         AS nombre_dia,
+    CASE WHEN DATEDIFF(DAY, '19000101', fecha) % 7 + 1 >= 6
+         THEN N'Sí' ELSE N'No' END       AS fin_de_semana
+FROM fechas;
+GO

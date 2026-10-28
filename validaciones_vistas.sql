@@ -65,3 +65,30 @@ LEFT JOIN rpt.v_transportistas AS t
 	ON v.id_transportista = t.id_transportista
 WHERE t.id_transportista IS NULL;
 
+
+--Validaciones de tabla calendario
+
+--Deben haber 1096 filas y fechas distintas
+SELECT COUNT(*) AS filas,
+		COUNT(DISTINCT fecha) AS fechas_distintas
+FROM rpt.v_calendario;
+
+-- Primera y última fecha: 1996-01-01 y 1998-12-31.
+SELECT MIN(fecha) AS primera_fecha,
+		MAX(fecha) AS ultima_fecha
+FROM rpt.v_calendario
+
+--Filtrá el 1996-01-01 y el 1996-07-04: tienen que salir Lunes y Jueves.
+SELECT fecha, nombre_dia
+FROM rpt.v_calendario
+WHERE fecha = '1996-01-01'
+OR
+fecha = '1996-07-04'
+ORDER BY fecha;
+
+--Huérfanos de fecha_pedido contra el calendario: 0.
+SELECT COUNT(*) AS huerfano
+FROM rpt.v_ventas AS v
+LEFT JOIN rpt.v_calendario AS c
+	ON v.fecha_pedido = c.fecha
+WHERE c.fecha IS NULL

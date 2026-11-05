@@ -1,0 +1,18 @@
+--Script de baja
+
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+
+DELETE 
+FROM dbo.[Order Details]
+WHERE OrderID IN (SELECT OrderID FROM dbo.Orders WHERE ShipName = N'PRUEBA PIPELINE');
+
+DELETE
+FROM dbo.Orders 
+WHERE ShipName = N'PRUEBA PIPELINE';
+
+SELECT *
+FROM dbo.Orders 
+WHERE ShipName = N'PRUEBA PIPELINE';
+
+COMMIT;

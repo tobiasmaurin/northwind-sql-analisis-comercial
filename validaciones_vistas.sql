@@ -92,3 +92,18 @@ FROM rpt.v_ventas AS v
 LEFT JOIN rpt.v_calendario AS c
 	ON v.fecha_pedido = c.fecha
 WHERE c.fecha IS NULL
+
+--Validaciones informe con IA
+SELECT COUNT(DISTINCT CustomerID) 
+FROM Orders
+WHERE OrderDate >= '1998-01-01'
+AND OrderDate < '1998-05-01';
+
+SELECT COUNT(DISTINCT CustomerID) 
+FROM Orders
+WHERE OrderDate >= '1997-01-01'
+AND OrderDate < '1997-05-01';
+
+SELECT COUNT(DISTINCT OrderID)
+FROM Orders
+WHERE ShippedDate IS NULL

@@ -1,8 +1,10 @@
-# Análisis comercial de Northwind con SQL Server
+# Análisis comercial de Northwind con SQL Server y Power BI
 
-Diagnóstico comercial para el comité de dirección de una distribuidora de alimentación: crecimiento del negocio, concentración de clientes, clientes en riesgo, evolución por categoría y rendimiento del equipo comercial.
+Diagnóstico comercial para el comité de dirección de una distribuidora de alimentación: crecimiento del negocio, concentración de clientes, clientes en riesgo, evolución por categoría y rendimiento del equipo comercial. El análisis se hizo en SQL y se llevó a un **informe de Power BI conectado a SQL Server**, publicado en Power BI Service con actualización automática y validado al céntimo contra las consultas SQL.
 
-**Herramientas:** SQL Server · SSMS · T-SQL (CTE, funciones de ventana, agregación condicional)
+**Herramientas:** SQL Server · SSMS · T-SQL (CTE, funciones de ventana, agregación condicional, vistas) · Power BI Desktop (modelo estrella, DAX) · Power BI Service (puerta de enlace, actualización programada) · Git / GitHub
+
+![Página de resumen del informe de Power BI](capturas/01_resumen.png)
 
 ---
 
@@ -143,6 +145,81 @@ Es el hallazgo más accionable del análisis: son clientes con un historial de c
 
 ---
 
+## Informe en Power BI
+
+Las conclusiones anteriores se llevaron a un informe de Power BI de tres páginas pensado para la directora comercial: cada página responde una pregunta, el título dice la conclusión con su cifra y cada página cierra con una recomendación.
+
+### Arquitectura
+
+```mermaid
+flowchart LR
+    A["Tablas de Northwind<br/>(SQL Server)"] --> B["Vistas del esquema rpt<br/>(modelo estrella)"]
+    B --> C["Power BI Desktop<br/>(modo Importar + DAX)"]
+    C --> D["Power BI Service<br/>(informe publicado)"]
+    G["Puerta de enlace<br/>(modo personal)"] -.-> D
+    A -.-> G
+```
+
+- **Power BI no lee las tablas originales, sino seis vistas** del esquema `rpt` (`vistas_powerbi.sql`). Las vistas funcionan como un contrato: centralizan la lógica (la facturación se calcula en un único sitio), usan nombres claros en español y quedan versionadas en este repositorio.
+- **Modo Importar:** Power BI guarda una copia de los datos, lo que hace el informe rápido. Para que esa copia se renueve sola, el informe está publicado en Power BI Service con una **puerta de enlace** que conecta la nube con el SQL Server local y una **actualización programada**.
+
+### Modelo de datos
+
+![Modelo estrella en Power BI](capturas/04_modelo.png)
+
+- **Tabla de hechos** `v_ventas`: una fila por línea de pedido (2.155 filas), con la facturación ya calculada.
+- **Cinco dimensiones**: clientes, productos (con categoría y proveedor incorporados), empleados, transportistas y un **calendario propio** generado en SQL (1.096 días, de 1996 a 1998 completos), marcado como tabla de fechas.
+- Relaciones uno a varios con filtro en una sola dirección, claves ocultas y **las medidas en tablas aparte** para mantener el modelo ordenado.
+- **Medidas DAX:** facturación, pedidos, ticket medio, año anterior (`SAMEPERIODLASTYEAR`), variación interanual, acumulado del año (`TOTALYTD`), % sobre el total (`CALCULATE` + `ALL`), clientes activos, clientes en riesgo, concentración del top 10 y días sin comprar. Los textos del informe (fecha del último dato, conclusiones, recomendaciones) también se calculan con DAX, así que se actualizan con los datos.
+
+### Páginas del informe
+
+**Clientes: dependencia y riesgo.** Concentración en los 10 mayores clientes y lista priorizada de clientes de 1997 que todavía no compraron en 1998.
+
+![Página de clientes](capturas/02_clientes.png)
+
+**Productos y equipo comercial.** Variación por categoría frente al total de la empresa (enero-abril) y actividad del equipo en 1997.
+
+![Página de productos y equipo](capturas/03_productos_equipo.png)
+
+### Validación cruzada SQL ↔ Power BI
+
+Antes de dar el informe por bueno, comprobé que Power BI devuelve exactamente las mismas cifras que las consultas SQL:
+
+| Cifra | SQL | Power BI |
+|---|---:|---:|
+| Facturación 1996 | 208.083,97 | 208.083,97 ✔ |
+| Facturación 1997 | 617.085,20 | 617.085,20 ✔ |
+| Facturación 1998 | 440.623,87 | 440.623,87 ✔ |
+| Facturación total | 1.265.793,04 | 1.265.793,04 ✔ |
+| Pedidos totales | 830 | 830 ✔ |
+| Facturación enero-abril 1997 | 191.321,88 | 191.321,88 ✔ |
+| Facturación enero-abril 1998 | 422.290,24 | 422.290,24 ✔ |
+| Variación enero-abril | +120,7 % | +120,7 % ✔ |
+| Concentración top 10 clientes | 45,0 % | 45,0 % ✔ |
+| Clientes en riesgo | 7 / 41.533,84 | 7 / 41.533,84 ✔ |
+| Concentración top 3 del equipo (1997) | 53,5 % | 53,5 % ✔ |
+
+Las vistas tienen además sus propias comprobaciones (`validaciones_vistas.sql`): número de filas, claves únicas en cada dimensión, ninguna venta sin su cliente, producto, empleado, transportista o fecha, y el calendario sin huecos.
+
+### Prueba de punta a punta
+
+Para demostrar que el informe publicado se actualiza solo, inserté en SQL Server un pedido de prueba identificable (`prueba_pipeline_alta.sql`: 1 pedido del 7 de mayo de 1998 por 180,00), actualicé el modelo en Power BI Service y comprobé que el informe lo reflejaba: la facturación de 1998 pasó de 440.623,87 a 440.803,87, la fecha del último dato a "7 may 1998" y los pedidos pendientes de envío de 21 a 22. Lo filtrado a enero-abril no cambió, como correspondía. Después borré el pedido (`prueba_pipeline_baja.sql`), volví a actualizar y el informe recuperó las cifras originales. Ambos scripts usan transacciones para que no puedan quedar datos a medias.
+
+![Historial de actualizaciones en Power BI Service](capturas/05_actualizacion.png)
+
+**Limitación conocida:** la puerta de enlace en modo personal depende de que el PC esté encendido; los días en que estuvo apagado la actualización programada falló. En un entorno de empresa se usaría una puerta de enlace estándar en un servidor siempre encendido o una base de datos en la nube, que no la necesita.
+
+### Uso de IA
+
+Las vistas SQL, el modelo de datos, las medidas base y de inteligencia de tiempo, la publicación en Power BI Service y todas las validaciones son trabajo mío. El diseño visual del informe (un objeto visual HTML) y parte de las medidas DAX (las analíticas adicionales, como clientes en riesgo o concentración del top 10, y las que generan los textos) los construí con ayuda de IA (Claude). Todo lo generado lo revisé y lo validé contra las consultas SQL: en esa revisión detecté que la página de equipo mezclaba periodos (la etiqueta decía 1997, pero la tabla mostraba enero-abril de 1998) y lo corregí.
+
+### Versión web
+
+El informe publicado en Power BI Service requiere iniciar sesión, así que también hay una **[versión web de consulta libre](https://claude.ai/artifact/GPdaJTV9UNpFhGE5t5fm55)**. Es una copia fija con los datos exportados del modelo el 04/11/2026: el informe vivo, que se actualiza, es el de Power BI.
+
+---
+
 ## Metodología
 
 **Definiciones:**
@@ -152,6 +229,7 @@ Es el hallazgo más accionable del análisis: son clientes con un historial de c
 - **Ticket medio** = facturación / número de pedidos.
 - **Envío a tiempo** = `ShippedDate <= RequiredDate`, calculado sobre los pedidos ya enviados.
 - **Cliente en riesgo** = con al menos un pedido en 1997 y ninguno en 1998.
+- **Moneda:** Northwind no indica la moneda de sus importes; el informe de Power BI los muestra en US$ como supuesto de presentación.
 
 **Decisiones de análisis:**
 - Comparaciones interanuales con el **mismo periodo (enero-abril)**, porque 1996 empieza en julio y 1998 termina el 6 de mayo.
@@ -165,6 +243,7 @@ Es el hallazgo más accionable del análisis: son clientes con un historial de c
 - La suma de los pedidos por empleado en 1997 (408) y de su facturación coincide con los totales de 1997 (diferencia de 0,02 por redondeo).
 - La suma de las facturaciones anuales (1.265.793,04) es el denominador del % sobre el total del análisis de Pareto.
 - En el análisis del equipo, comprobé que el filtro de 1997 se aplica **dentro** de la CTE: en una primera versión se aplicaba fuera y mezclaba datos de los tres años. Lo detecté y lo corregí.
+- El modelo de Power BI reproduce las mismas cifras (ver [Validación cruzada](#validación-cruzada-sql--power-bi)).
 
 ---
 
@@ -172,18 +251,28 @@ Es el hallazgo más accionable del análisis: son clientes con un historial de c
 
 ```
 ├── README.md
-└── analisis_comercial_northwind.sql   ← las 5 consultas, separadas y comentadas por pregunta
+├── analisis_comercial_northwind.sql   ← las 5 consultas del análisis, comentadas por pregunta
+├── vistas_powerbi.sql                 ← esquema rpt: las 6 vistas del modelo estrella
+├── validaciones_vistas.sql            ← comprobaciones de las vistas (filas, claves, huérfanos, cifras)
+├── prueba_pipeline_alta.sql           ← inserta un pedido de prueba identificable
+├── prueba_pipeline_baja.sql           ← borra el pedido de prueba
+├── powerbi/
+│   └── northwind_comercial.pbix       ← modelo e informe de Power BI
+└── capturas/                          ← imágenes de este README
 ```
 
 ## Cómo reproducirlo
 
 1. Instalar SQL Server (la edición Developer o Express es gratuita) y SQL Server Management Studio (SSMS).
 2. Crear la base de datos Northwind con el script oficial de Microsoft: [sql-server-samples / northwind-pubs](https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs).
-3. Abrir `analisis_comercial_northwind.sql` en SSMS y ejecutar cada bloque por separado (seleccionar el bloque y pulsar F5).
+3. **Análisis SQL:** abrir `analisis_comercial_northwind.sql` en SSMS y ejecutar cada bloque por separado (seleccionar el bloque y pulsar F5).
+4. **Vistas para Power BI:** ejecutar `vistas_powerbi.sql` completo y comprobarlas con `validaciones_vistas.sql`.
+5. **Informe:** abrir `powerbi/northwind_comercial.pbix` en Power BI Desktop (gratuito). Si el servidor no se llama `localhost`, cambiarlo en *Inicio → Transformar datos → Configuración de origen de datos → Cambiar origen* y pulsar *Actualizar*.
 
 ## Próximos pasos
 
-- Dashboard en Power BI conectado a SQL Server con estas mismas métricas, validando que las cifras coinciden con las consultas SQL (en curso).
+- **Periodo comparable dinámico:** sustituir el filtro fijo de enero-abril por un periodo que se calcule a partir del último dato, para que el informe no tenga que editarse a mano cuando lleguen meses nuevos.
+- **Base de datos en la nube (Azure SQL Database):** eliminar la dependencia de la puerta de enlace personal y de un PC encendido.
 
 ---
 
